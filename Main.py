@@ -1,68 +1,88 @@
 import cv2
 import numpy as np
 
-image = cv2.imread("instructions.jpeg")
-imgcopy = image.copy()
-gray = cv2.cvtColor(image,cv2.COLOR_BGR2GRAY)
-height,width = imgcopy.shape[:2]
 
-_,threshold = cv2.threshold(gray,0,255,cv2.THRESH_BINARY+ cv2.THRESH_OTSU)
+#Preset the image size
+widthImage=640
+heightImage=480
 
-contours, hierarchy = cv2.findContours(threshold, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-largest_contour = max(contours, key=cv2.contourArea)
-peri = cv2.arcLength(largest_contour,True)
-epsilon = 0.02*peri
-approx = cv2.approxPolyDP(largest_contour,epsilon,True)
+#video capturing from mac cam
+capture = cv2.VideoCapture(0)
+capture.set(3,widthImage)
+capture.set(4,heightImage)
+capture.set(10,150)
 
-corner_points = approx.reshape(4, 2)
-for corner in corner_points:
-    cv2.circle(imgcopy,tuple(corner),20,(255,0,0),-1)
+def preProcessing(img):
+    imgGray = cv2.cvtColor(img,cv2.COLOR_BGR2GRAY)
+    imgBlur = cv2.GaussianBlur(imgGray,(5,5),1)
+    imgCanny = cv2.Canny(imgBlur,200,200)
+    kernel = np.ones((5,5))
+    imgDil = cv2.dilate(imgCanny,kernel,iterations=2)
+    imgThresh = cv2.erode(imgDil,kernel,iterations=1)
 
-cv2.drawContours(imgcopy, [largest_contour], -1, (0, 255, 0), 2)
+    return imgThresh
 
-destination_points = np.float32([[0, 0], [width, 0], [width, height], [0, height]])
-corner_points = np.float32(corner_points[::-1])
-destination_points = np.array(destination_points, dtype=np.float32)
+def getContour(img):
+    maxArea = 0
+    biggest = np.array([])
+    contour,heirarchy = cv2.findContours(img,cv2.RETR_EXTERNAL,cv2.CHAIN_APPROX_NONE)
+    for cnt in contour:
+        area = cv2.contourArea(cnt)
+        if area > 5000:
+            peri = cv2.arcLength(cnt,True)
+            approx = cv2.approxPolyDP(cnt,0.02*peri,True)
+            if area > maxArea and len(approx) == 4:
+                biggest = approx
+                maxArea = area
+    cv2.drawContours(imgContour,biggest,-1,(255,0,0),20)
+    return biggest
 
-perspective_matrix = cv2.getPerspectiveTransform(corner_points, destination_points)
-warped_image = cv2.warpPerspective(image, perspective_matrix, (width, height))
+def getWarp(img,biggest):
+    biggest = reorder(biggest)
+    pts1 = np.float32(biggest)
+    pts2 = np.float32([[0,0],[widthImage,0],[0,heightImage],[widthImage,heightImage]])
 
-cv2.drawContours(imgcopy, [largest_contour], -1, (0, 255, 0), 2)
-cv2.imshow("Bird's Eye view",warped_image)
-cv2.waitKey(0)
+    matrix = cv2.getPerspectiveTransform(pts1,pts2)
+    imgOutput = cv2.warpPerspective(img,matrix,(widthImage,heightImage))
+    imgCrop = imgOutput[20:imgOutput.shape[0]-20,20:imgOutput.shape[1]-20]
+    imgCrop = cv2.resize(imgCrop,(widthImage,heightImage))
+
+    return imgCrop
 
 
 
+def reorder(Points):
+    # Convert Points to a 2D array with shape (4, 2)
+    Points = Points.reshape((4, 2))
+    newPoints = np.zeros((4,1,2), np.int32)
+    # Sum of coordinates along axis 1
+    add = Points.sum(1)
+    # Find the top-left and bottom-right points
+    newPoints[0] = Points[np.argmin(add)]
+    newPoints[3] = Points[np.argmax(add)]
+    # Difference of coordinates along axis 1
+    diff = np.diff(Points, axis=1)
+    # Find the top-right and bottom-left points
+    newPoints[1] = Points[np.argmin(diff)]
+    newPoints[2] = Points[np.argmax(diff)]
 
+    return newPoints
 
-# while True:
-#     h_min = cv2.getTrackbarPos("Hue Min", "ColorPicker")
-#     h_max = cv2.getTrackbarPos("Hue Max", "ColorPicker")
-#     s_min = cv2.getTrackbarPos("Sat Min", "ColorPicker")
-#     s_max = cv2.getTrackbarPos("Sat Max", "ColorPicker")
-#     v_min = cv2.getTrackbarPos("Val Min", "ColorPicker")
-#     v_max = cv2.getTrackbarPos("Val Max", "ColorPicker")
-#     lower = np.array([h_min,s_min,v_min])
-#     upper = np.array([h_max,s_max,v_max])
-#     mask = cv2.inRange(imgHSV,lower,upper)
-#
-#
-#     cv2.imshow("image",imgHSV)
-#     cv2.imshow("mask", mask)
-#
-#     cv2.waitKey(1)
-#
-#
-#
-# # x,y,w,h = cv2.boundingRect(max_contour)
-# #
-# # cv2.rectangle(imgcopy,(x,y),(x+w,y+h),(0,255,0),1)
-# #
-# #
-# # contourimage = np.zeros_like(imgcopy)
-# #
-# # #cv2.drawContours(imgcopy,contours,-1,(0,255,0),2)
+#Display the video footage
+while True:
+    success,img = capture.read()
+    img = cv2.resize(img,(widthImage,heightImage))
+    imgContour = img.copy()
+    imgThresh = preProcessing(img)
+    biggest = getContour(imgThresh)
+    if biggest.size != 0 and len(biggest) == 4:
+        imgWarp = getWarp(biggest, img)
+    else:
+        imgWarp = img
 
+    cv2.imshow("Video", imgWarp)
+    if cv2.waitKey(1) & 0xFF == ord('q'):
+        break
 
 
 
